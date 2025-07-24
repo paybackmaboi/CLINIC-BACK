@@ -1,38 +1,67 @@
-// controllers/patient.controller.js
+const { User, MedicalProfile, Consultation } = require('../models');
 
-const { User, MedicalProfile } = require('../models');
+// Helper function to find or create the test user and its profile
+const findOrCreateTestUser = async () => {
+    const [user, created] = await User.findOrCreate({
+        where: { id: 1 },
+        defaults: { role: 'patient' },
+    });
 
-// Controller to get all patients
-exports.getAllPatients = async (req, res) => {
+    if (created) {
+        console.log('✅ Created test user with ID 1');
+        // If the user is new, they need a medical profile to update
+        await MedicalProfile.create({ UserId: user.id });
+        console.log('✅ Created associated medical profile for user 1');
+    }
+    return user;
+};
+
+// Define the controller functions
+const getDashboard = async (req, res) => {
     try {
-        const users = await User.findAll({
-            where: { role: 'patient' },
-            include: [MedicalProfile]
+        const user = await findOrCreateTestUser();
+        const userId = user.id;
+
+        const appointments = await Consultation.findAll({
+            where: { UserId: userId },
+            order: [['appointmentTime', 'ASC']],
         });
-        res.status(200).json(users);
+
+        // The health history is the medical profile itself
+        const healthHistory = await MedicalProfile.findOne({
+            where: { UserId: userId },
+        });
+
+        res.status(200).json({ appointments, healthHistory });
     } catch (error) {
-        console.error('Error fetching patients:', error);
-        res.status(500).json({ message: 'Server error while fetching patients.' });
+        console.error('❌ Error in getDashboard:', error);
+        res.status(500).json({ message: 'Error fetching dashboard data.', error: error.message });
     }
 };
 
-// Controller to create or update a patient's medical profile
-exports.saveMedicalProfile = async (req, res) => {
+const updateProfile = async (req, res) => {
     try {
-        // In a real app, userId would come from an authenticated session/token.
-        const [user, created] = await User.findOrCreate({
-            where: { id: req.body.userId || 1 }, // Using a placeholder ID
-            defaults: { role: 'patient' }
+        const user = await findOrCreateTestUser();
+        const userId = user.id;
+
+        const [updatedCount] = await MedicalProfile.update(req.body, {
+            where: { UserId: userId },
         });
 
-        const profileData = { ...req.body, UserId: user.id };
-        
-        // Use `upsert` to create a new profile or update an existing one for the user.
-        await MedicalProfile.upsert(profileData);
-        
-        res.status(201).json({ message: 'Profile saved successfully.' });
+        if (updatedCount > 0) {
+            const updatedProfile = await MedicalProfile.findOne({ where: { UserId: userId } });
+            res.status(200).json(updatedProfile);
+        } else {
+            res.status(404).json({ message: 'Medical profile not found for this user.' });
+        }
     } catch (error) {
-        console.error('Error creating/updating medical profile:', error);
-        res.status(500).json({ message: 'Failed to save medical profile.' });
+        console.error('❌ Error in updateProfile:', error);
+        res.status(500).json({ message: 'Error updating profile.', error: error.message });
     }
+};
+
+// Export all functions as a single object
+module.exports = {
+    getDashboard,
+    updateProfile,
 };
